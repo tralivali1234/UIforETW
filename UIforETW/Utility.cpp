@@ -43,7 +43,9 @@ std::wstring GetDocumentsFolderPath()
 		FOLDERID_Documents, KF_FLAG_NO_ALIAS, NULL, &docsPathTemp.m_pData);
 	if (FAILED(docsPathResult))
 	{
+#ifdef OUTPUT_DEBUG_STRINGS
 		debugPrintf(L"SHGetKnownFolderPath (for Documents) failed to retrieve the path.\n");
+#endif
 		std::terminate();
 	}
 	return docsPathTemp.m_pData;
@@ -51,7 +53,6 @@ std::wstring GetDocumentsFolderPath()
 
 void copyFileToDocumentsWPA(PCWSTR const fileName, const std::wstring& exeDir, const bool force)
 {
-	// First copy the WPA 8.1 startup.wpaProfile file
 	std::wstring docsPath(GetDocumentsFolderPath());
 
 	if (docsPath.empty())
@@ -86,7 +87,7 @@ void copyFileToDocumentsWPA(PCWSTR const fileName, const std::wstring& exeDir, c
 void copyWPAProfileToLocalAppData(const std::wstring& exeDir, const bool force)
 {
 	PCWSTR const localAppDataEnvVar = L"localappdata";
-	// Then copy the WPA 10 startup.wpaProfile file
+	// Copy the WPA 10 startup.wpaProfile file
 	const std::wstring localAppData = GetEnvironmentVariableString(localAppDataEnvVar);
 	if (localAppData.empty())
 	{
@@ -148,6 +149,7 @@ void outputLastError(const DWORD lastErr)
 
 void debugLastError(const DWORD lastErr) noexcept
 {
+#ifdef OUTPUT_DEBUG_STRINGS
 	const DWORD errMsgSize = 1024u;
 	wchar_t errBuff[errMsgSize] = {};
 	const DWORD ret = ::FormatMessageW(
@@ -158,6 +160,9 @@ void debugLastError(const DWORD lastErr) noexcept
 	if (ret == 0)
 		return; // FormatMessageW failed.
 	debugPrintf(L"UIforETW encountered an error: %s\r\n", errBuff);
+#else
+	(void)lastErr;
+#endif
 }
 
 std::vector<std::wstring> split(const std::wstring& s, const char c)
@@ -338,6 +343,13 @@ std::wstring ReadRegistryString(HKEY root, const std::wstring& subkey, const std
 	return value;
 }
 
+bool GetRegistryDWORD(const HKEY root, const std::wstring& subkey, const std::wstring& valueName, DWORD* pValue) noexcept
+{
+	DWORD type = 0;
+	DWORD byteCount = sizeof(*pValue);
+	auto result = ::RegGetValueW(root, subkey.c_str(), valueName.c_str(), RRF_RT_REG_DWORD | RRF_ZEROONFAILURE, &type, pValue, &byteCount);
+	return result == ERROR_SUCCESS;
+}
 
 void SetRegistryDWORD(const HKEY root, const std::wstring& subkey, const std::wstring& valueName, const DWORD value) noexcept
 {
@@ -700,7 +712,9 @@ int64_t GetFileSize(const std::wstring& path) noexcept
 
 	if (hFile == INVALID_HANDLE_VALUE)
 	{
+#ifdef OUTPUT_DEBUG_STRINGS
 		debugPrintf(L"Failed to get file size!\n");
+#endif
 		debugLastError();
 		return 0;
 	}
@@ -949,9 +963,6 @@ void CopyStartupProfiles(const std::wstring& exeDir, const bool force)
 	if (force)
 		outputPrintf(L"\n");
 
-	// WPA 8.1 stores startup.wpaProfile file in Documents/WPA Files
-	copyFileToDocumentsWPA(kWPAStartupFileName, exeDir, force);
-
 	copyFileToDocumentsWPA(kChromeRegionsFileName, exeDir, force);
 
 	copyWPAProfileToLocalAppData(exeDir, force);
@@ -974,3 +985,58 @@ void MoveControl(const CWnd* pParent, CWnd& control, int xDelta, int yDelta)
 	control.SetWindowPos(nullptr, p.x + xDelta, p.y + yDelta, 0, 0, flags);
 }
 #endif
+
+// Parse the semi-colon separated heap trace settings
+HeapTracedProcesses ParseHeapTracingSettings(std::wstring heapTracingExes)
+{
+	HeapTracedProcesses result;
+	for (const auto& tracingName : split(heapTracingExes, ';'))
+	{
+		if (tracingName.size())
+		{
+			auto* p = tracingName.c_str();
+			// If the first character is a digit then assume that it's a PID.
+			if (iswdigit(p[0]))
+			{
+				if (wcschr(p, L' '))
+				{
+					outputPrintf(L"Error: don't use space separators between PIDs for heap tracing - use semicolons.\n");
+					continue;
+				}
+				// Convert to space separated PIDs because that is what the xperf -Pids
+				// option expects.
+				if (result.processIDs.size() > 0)
+					result.processIDs += L' ';
+				result.processIDs += tracingName;
+			}
+			else if (wcschr(p, '\\'))
+			{
+				// It must be a full path name.
+				result.pathName = tracingName;
+			}
+			else
+			{
+				if (wcschr(p, L' '))
+				{
+					outputPrintf(L"Error: don't use space separators between process names for heap tracing - use semicolons.\n");
+					continue;
+				}
+				result.processNames.push_back(tracingName);
+			}
+		}
+	}
+
+	// Since the three types of heap profiling are mutually exclusive, clear the
+	// ones that will not be used, to ensure consistency.
+	if (result.pathName.size())
+	{
+		result.processIDs = L"";
+		result.processNames.clear();
+	}
+	else if (result.processIDs.size())
+	{
+		result.processNames.clear();
+	}
+
+	return result;
+}

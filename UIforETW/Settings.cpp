@@ -57,6 +57,9 @@ const PCWSTR filtered_event_group_names[] =
 	L"disabled-by-default-toplevel.flow",               // 0x2000
 	L"startup",                                         // 0x4000
 	L"latency",                                         // 0x8000
+	L"blink.user_timing",                               // 0x10000
+	L"media",                                           // 0x20000
+	L"loading",                                         // 0x40000
 };
 
 // 1ULL << 61 and 1ULL << 62 are special values that indicate to Chrome to
@@ -71,10 +74,9 @@ uint64_t disabled_other_events_keyword_bit = 1ULL << 62;
 
 IMPLEMENT_DYNAMIC(CSettings, CDialog)
 
-CSettings::CSettings(CWnd* pParent /*=NULL*/, const std::wstring& exeDir, const std::wstring& wpt81Dir, const std::wstring& wpt10Dir) noexcept
+CSettings::CSettings(CWnd* pParent /*=NULL*/, const std::wstring& exeDir, const std::wstring& wpt10Dir) noexcept
 	: CDialog(CSettings::IDD, pParent)
 	, exeDir_(exeDir)
-	, wpt81Dir_(wpt81Dir)
 	, wpt10Dir_(wpt10Dir)
 {
 
@@ -96,6 +98,7 @@ void CSettings::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_PERFORMANCECOUNTERS, btPerfCounters_);
 	DDX_Control(pDX, IDC_COPYSTARTUPPROFILE, btCopyStartupProfile_);
 	DDX_Control(pDX, IDC_USE_OTHER_KERNEL_LOGGER, btUseOtherKernelLogger_);
+	DDX_Control(pDX, IDC_RECORD_TRACE_COMMAND, btRecordTraceCommand_);
 	DDX_Control(pDX, IDC_CHROMEDEVELOPER, btChromeDeveloper_);
 	DDX_Control(pDX, IDC_AUTOVIEWTRACES, btAutoViewTraces_);
 	DDX_Control(pDX, IDC_RECORD_PRE_TRACE, btRecordPreTrace_);
@@ -123,6 +126,7 @@ BEGIN_MESSAGE_MAP(CSettings, CDialog)
 	ON_BN_CLICKED(IDC_RECORD_PRE_TRACE, &CSettings::OnBnClickedRecordPreTrace)
 	ON_BN_CLICKED(IDC_IDENTIFY_CHROME_CPU, &CSettings::OnBnClickedIdentifyChromeCpu)
 	ON_BN_CLICKED(IDC_BACKGROUND_MONITORING, &CSettings::OnBnClickedBackgroundMonitoring)
+	ON_BN_CLICKED(IDC_RECORD_TRACE_COMMAND, &CSettings::OnBnClickedRecordTraceCommand)
 END_MESSAGE_MAP()
 
 BOOL CSettings::OnInitDialog()
@@ -139,6 +143,7 @@ BOOL CSettings::OnInitDialog()
 	CheckDlgButton(IDC_HEAPSTACKS, bHeapStacks_);
 	CheckDlgButton(IDC_VIRTUALALLOCSTACKS, bVirtualAllocStacks_);
 	CheckDlgButton(IDC_CHECKFORNEWVERSIONS, bVersionChecks_);
+	CheckDlgButton(IDC_RECORD_TRACE_COMMAND, bRecordTraceCommand_);
 
 	btIdentifyChromeProcessesCPU_.EnableWindow(bChromeDeveloper_);
 	if (IsWindows8Point1OrGreater())
@@ -169,10 +174,13 @@ BOOL CSettings::OnInitDialog()
 		toolTip_.SetMaxTipWidth(400);
 		toolTip_.Activate(TRUE);
 
-		toolTip_.AddTool(&btHeapTracingExe_, L"Specify the file names of the exes to be heap traced, "
-					L"separated by semi-colons. "
-					L"Enter just the file parts (with the .exe extension) not a full path. For example, "
-					L"'chrome.exe;notepad.exe'. This is for use with the heap-tracing-to-file mode.");
+		toolTip_.AddTool(&btHeapTracingExe_, L"Specify which processes to heap trace when using "
+					L"heap-tracing-to-file mode. Three different methods can be used to specify the processes:\n"
+					L"1) A semi-colon separated list of process names, such as 'chrome.exe;notepad.exe'. "
+					L"The processes must be launched after this is set and heap-tracing-to-file is selected.\n"
+					L"2) A semi-colon separated list of process IDs (PIDs) - maximum of two - such as '1234;5678'.\n"
+					L"3) A fully specified path to an executable that will be launched by ETW when heap tracing is "
+					L"started.");
 		toolTip_.AddTool(&btExtraKernelFlags_, L"Extra kernel flags, separated by '+', such as "
 					L"\"REGISTRY+PERF_COUNTER\". See \"xperf -providers k\" for the full list. "
 					L"Note that incorrect kernel flags will cause tracing to fail to start.");
@@ -194,11 +202,12 @@ BOOL CSettings::OnInitDialog()
 					L"(proportional set size) calculated for monitored processes. This may consume "
 					L"dozens or hundreds of ms each time. Without this checked only full working "
 					L"set is calculated, which is cheap.");
-		toolTip_.AddTool(&btCopyStartupProfile_, L"Copies startup.wpaProfile files for WPA 8.1 and "
-					L"10 to the appropriate destinations so that the next time WPA starts up it will have "
-					L"reasonable analysis defaults.");
+		toolTip_.AddTool(&btCopyStartupProfile_, L"Copies configuration files so that the next time "
+					L"WPA starts up it will have reasonable analysis defaults.");
 		toolTip_.AddTool(&btUseOtherKernelLogger_, L"Check this to have UIforETW use the alternate kernel "
 					L"logger. This is needed on some machines where the main kernel logger is in use.");
+		toolTip_.AddTool(&btRecordTraceCommand_, L"Check this to have UIforETW record the initial xperf "
+					L"command in the trace information file.");
 		toolTip_.AddTool(&btChromeDeveloper_, L"Check this to enable Chrome specific behavior such as "
 					L"setting the Chrome symbol server path, and identifying Chrome processes.");
 		toolTip_.AddTool(&btAutoViewTraces_, L"Check this to have UIforETW launch the trace viewer "
@@ -420,4 +429,10 @@ void CSettings::OnBnClickedRecordPreTrace() noexcept
 void CSettings::OnBnClickedBackgroundMonitoring() noexcept
 {
 	bBackgroundTracing_ = !bBackgroundTracing_;
+}
+
+
+void CSettings::OnBnClickedRecordTraceCommand()
+{
+	bRecordTraceCommand_ = !bRecordTraceCommand_;
 }

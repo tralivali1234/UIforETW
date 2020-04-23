@@ -205,7 +205,7 @@ void CUIforETWDlg::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_CONTEXTSWITCHCALLSTACKS, btCswitchStacks_);
 	DDX_Control(pDX, IDC_FASTSAMPLING, btFastSampling_);
 	DDX_Control(pDX, IDC_GPUTRACING, btGPUTracing_);
-	DDX_Control(pDX, IDC_CLRTRACING, btCLRTracing_ );
+	DDX_Control(pDX, IDC_CLRTRACING, btCLRTracing_);
 	DDX_Control(pDX, IDC_SHOWCOMMANDS, btShowCommands_);
 
 	DDX_Control(pDX, IDC_INPUTTRACING, btInputTracing_);
@@ -245,7 +245,6 @@ BEGIN_MESSAGE_MAP(CUIforETWDlg, CDialog)
 	ON_CBN_SELCHANGE(IDC_TRACINGMODE, &CUIforETWDlg::OnCbnSelchangeTracingmode)
 	ON_BN_CLICKED(IDC_SETTINGS, &CUIforETWDlg::OnBnClickedSettings)
 	ON_WM_CONTEXTMENU()
-	ON_BN_CLICKED(ID_TRACES_OPENTRACEINWPA, &CUIforETWDlg::OnOpenTraceWPA)
 	ON_BN_CLICKED(ID_TRACES_OPENTRACEIN10WPA, &CUIforETWDlg::OnOpenTrace10WPA)
 	ON_BN_CLICKED(ID_TRACES_OPENTRACEINGPUVIEW, &CUIforETWDlg::OnOpenTraceGPUView)
 	ON_BN_CLICKED(ID_RENAME, &CUIforETWDlg::OnRenameKey)
@@ -260,7 +259,7 @@ BEGIN_MESSAGE_MAP(CUIforETWDlg, CDialog)
 	ON_BN_CLICKED(ID_PASTEOVERRIDE, &CUIforETWDlg::NotesPaste)
 	ON_WM_ACTIVATE()
 	ON_WM_TIMER()
-	ON_BN_CLICKED( IDC_CLRTRACING, &CUIforETWDlg::OnBnClickedClrtracing )
+	ON_BN_CLICKED(IDC_CLRTRACING, &CUIforETWDlg::OnBnClickedClrtracing)
 END_MESSAGE_MAP()
 
 
@@ -351,8 +350,19 @@ BOOL CUIforETWDlg::OnInitDialog()
 
 	CRect windowRect;
 	GetWindowRect(&windowRect);
-	initialWidth_ = lastWidth_ = windowRect.Width();
-	initialHeight_ = lastHeight_ = windowRect.Height();
+	initialWidth_ = minWidth_ = lastWidth_ = windowRect.Width();
+	initialHeight_ = minHeight_ = lastHeight_ = windowRect.Height();
+
+	// Ensure previousWidth_ and previousHeight_ are valid
+	if (previousWidth_ < initialWidth_)
+	{
+		previousWidth_ = initialWidth_;
+	}
+
+	if (previousHeight_ < initialHeight_)
+	{
+		previousHeight_ = initialHeight_;
+	}
 
 	// Win+Ctrl+R is used to trigger recording of traces. This is compatible with
 	// wprui. If this is changed then be sure to change the text on *both* buttons
@@ -403,13 +413,7 @@ BOOL CUIforETWDlg::OnInitDialog()
 
 	// The WPT installer is always a 32-bit installer, so we look for it in
 	// ProgramFilesX86 / WOW6432Node, on 32-bit and 64-bit operating systems.
-	wpt81Dir_ = ReadRegistryString(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Microsoft SDKs\\Windows\\v8.1", L"InstallationFolder", true);
 	wpt10Dir_ = ReadRegistryString(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Microsoft SDKs\\Windows\\v10.0", L"InstallationFolder", true);
-	if (!wpt81Dir_.empty())
-	{
-		EnsureEndsWithDirSeparator(wpt81Dir_);
-		wpt81Dir_ += L"Windows Performance Toolkit\\";
-	}
 	if (!wpt10Dir_.empty())
 	{
 		EnsureEndsWithDirSeparator(wpt10Dir_);
@@ -417,7 +421,7 @@ BOOL CUIforETWDlg::OnInitDialog()
 	}
 
 	// If the registry entries were unavailable, fall back to assuming their installation directory.
-	if (wpt81Dir_.empty() || wpt10Dir_.empty())
+	if (wpt10Dir_.empty())
 	{
 		wchar_t* progFilesx86Dir = nullptr;
 		if (!SUCCEEDED(SHGetKnownFolderPath(FOLDERID_ProgramFilesX86, 0, nullptr, &progFilesx86Dir)))
@@ -425,10 +429,6 @@ BOOL CUIforETWDlg::OnInitDialog()
 		std::wstring windowsKitsDir = progFilesx86Dir;
 		CoTaskMemFree(progFilesx86Dir);
 		windowsKitsDir += L"\\Windows Kits\\";
-		if (wpt81Dir_.empty())
-		{
-			wpt81Dir_ = windowsKitsDir + L"8.1\\Windows Performance Toolkit\\";
-		}
 		if (wpt10Dir_.empty())
 		{
 			wpt10Dir_ = windowsKitsDir + L"10\\Windows Performance Toolkit\\";
@@ -437,8 +437,8 @@ BOOL CUIforETWDlg::OnInitDialog()
 
 	auto xperfVersion = GetFileVersion(GetXperfPath());
 	const int64_t requiredXperfVersion = (10llu << 48) + 0 + (10586llu << 16) + (15llu << 0);
-	// Windows 10 Fall Creators Update version (October 2017) - requires Windows 8 or higher?
-	const int64_t preferredXperfVersion = (10llu << 48) + 0 + (16299llu << 16) + (15llu << 0);
+	// Windows 10 spring 2019 version, 10.0.18362.1 - requires Windows 8 or higher?
+	const int64_t preferredXperfVersion = (10llu << 48) + 0 + (18362llu << 16) + (1llu << 0);
 
 	wchar_t systemDir[MAX_PATH];
 	systemDir[0] = 0;
@@ -487,7 +487,10 @@ BOOL CUIforETWDlg::OnInitDialog()
 					const DWORD installResult10 = child.GetExitCode();
 					if (!installResult10)
 					{
-						outputPrintf(L"WPT version 10.0.15063 was installed.\n");
+						xperfVersion = GetFileVersion(GetXperfPath());
+						outputPrintf(L"WPT version %llu.%llu.%llu.%llu was installed.\n",
+							xperfVersion >> 48, (xperfVersion >> 32) & 0xFFFF,
+							(xperfVersion >> 16) & 0xFFFF, xperfVersion & 0xFFFF);
 					}
 					else
 					{
@@ -514,13 +517,13 @@ BOOL CUIforETWDlg::OnInitDialog()
 					L"then WPT will be automatically installed. Exiting.").c_str());
 		}
 		else
-		{ 
+		{
 			if (xperfVersion)
-				AfxMessageBox((GetXperfPath() + L" must be version 10.0.10586.15 or higher. You'll need to find the installer in the Windows "
+				AfxMessageBox((GetXperfPath() + L" must be version 10.0.10586.15 or higher. You'll need to find the installer in the "
 					L"Windows 10 SDK or you can xcopy install it. Exiting.").c_str());
 			else
-				AfxMessageBox((GetXperfPath() + L" does not exist. You'll need to find the installer in the Windows "
-				L"Windows 10 SDK or you can xcopy install it. Exiting.").c_str());
+				AfxMessageBox((GetXperfPath() + L" does not exist. You'll need to find the installer in the "
+					L"Windows 10 SDK or you can xcopy install it. Exiting.").c_str());
 		}
 		exit(10);
 	}
@@ -530,7 +533,7 @@ BOOL CUIforETWDlg::OnInitDialog()
 		if (IsWindowsSevenOrLesser())
 		{
 			AfxMessageBox(L"The installed version of Windows Performance Toolkit is not compatible with Windows 7. "
-										L"Please uninstall it and run UIforETW again.");
+				L"Please uninstall it and run UIforETW again.");
 		}
 		else
 		{
@@ -538,13 +541,16 @@ BOOL CUIforETWDlg::OnInitDialog()
 		}
 	}
 
-	if (!PathFileExists((wpt81Dir_ + L"xperf.exe").c_str()))
-		wpt81Dir_ = L"";
-
-	if (!wpt81Dir_.empty())
-		wpa81Path_ = wpt81Dir_ + L"wpa.exe";
 	gpuViewPath_ = wpt10Dir_ + L"gpuview\\gpuview.exe";
 	wpa10Path_ = wpt10Dir_ + L"wpa.exe";
+
+	// When WPT has just been installed it will not be in the path, which means
+	// that Python scripts which rely on xperf.exe being in the path will fail.
+	// This adds the WPT10 directory to the path. We could just do this when WPT
+	// has been freshly installed but this seems cleaner.
+	auto path = GetEnvironmentVariableString(L"path");
+	path += L';' + wpt10Dir_;
+	SetEnvironmentVariable(L"path", path.c_str());
 
 	// The Media Experience Analyzer is a 64-bit installer, so we look for it in
 	// ProgramFiles.
@@ -560,7 +566,9 @@ BOOL CUIforETWDlg::OnInitDialog()
 	UIETWASSERT(getMyDocsResult);
 	if (!getMyDocsResult)
 	{
+#ifdef OUTPUT_DEBUG_STRINGS
 		OutputDebugStringA("Failed to find My Documents directory.\r\n");
+#endif
 		exit(10);
 	}
 	std::wstring defaultTraceDir = documents + std::wstring(L"\\etwtraces\\");
@@ -684,14 +692,16 @@ BOOL CUIforETWDlg::OnInitDialog()
 	if (bVersionChecks_)
 		versionCheckerThread_.StartVersionCheckerThread(this);
 
+	const UINT flags = SWP_NOMOVE | SWP_NOOWNERZORDER | SWP_NOZORDER | SWP_NOACTIVATE;
+	// Resize our window per the previous dimensions if we have them
+	SetWindowPos(nullptr, 0, 0, previousWidth_, previousHeight_, flags);
+
 	return TRUE; // return TRUE unless you set the focus to a control
 }
 
 std::wstring CUIforETWDlg::wpaDefaultPath() const
 {
-	if (PathFileExists(wpa10Path_.c_str()))
-		return wpa10Path_;
-	return wpa81Path_;
+	return wpa10Path_;
 }
 
 std::wstring CUIforETWDlg::GetDirectory(PCWSTR env, const std::wstring& defaultDir)
@@ -729,10 +739,15 @@ void CUIforETWDlg::RegisterProviders()
 	// Be sure to register the version of the DLLs that we are actually using.
 	// This is important when adding new provider tasks, but should not otherwise
 	// matter.
-	if (Is64BitBuild())
-		dllSource += L"ETWProviders64.dll";
-	else
-		dllSource += L"ETWProviders.dll";
+#ifdef _M_ARM64
+	dllSource += L"ETWProvidersARM64.dll";
+#elif _M_X64
+	dllSource += L"ETWProviders64.dll";
+#elif _M_IX86
+	dllSource += L"ETWProviders.dll";
+#else
+#error Unknown CPU type
+#endif
 	const std::wstring temp = GetEnvironmentVariableString(L"temp");
 	if (temp.empty())
 		return;
@@ -820,7 +835,7 @@ void CUIforETWDlg::UpdateEnabling() noexcept
 	SmartEnableWindow(btSampledStacks_.m_hWnd, !bIsTracing_);
 	SmartEnableWindow(btCswitchStacks_.m_hWnd, !bIsTracing_);
 	SmartEnableWindow(btGPUTracing_.m_hWnd, !bIsTracing_);
-	SmartEnableWindow(btCLRTracing_.m_hWnd, !bIsTracing_ );
+	SmartEnableWindow(btCLRTracing_.m_hWnd, !bIsTracing_);
 }
 
 void CUIforETWDlg::OnSysCommand(UINT nID, LPARAM lParam)
@@ -963,13 +978,37 @@ void CUIforETWDlg::StopEventThreads()
 void CUIforETWDlg::OnBnClickedStarttracing()
 {
 	RegisterProviders();
-	StartEventThreads();
 	if (tracingMode_ == kTracingToMemory)
 		outputPrintf(L"\nStarting tracing to in-memory circular buffers...\n");
 	else if (tracingMode_ == kTracingToFile)
 		outputPrintf(L"\nStarting tracing to disk...\n");
 	else if (tracingMode_ == kHeapTracingToFile)
-		outputPrintf(L"\nStarting heap tracing to disk of %s...\n", heapTracingExes_.c_str());
+	{
+		auto heapSettings = ParseHeapTracingSettings(heapTracingExes_);
+		if (heapSettings.pathName.size())
+		{
+			outputPrintf(L"");
+			// Launch and heap-profile the specified process, handy for heap-profiling
+			// the browser process from startup.
+			outputPrintf(L"\nLaunching and heap tracing to disk %s...\n", heapSettings.pathName.c_str());
+		}
+		else if (heapSettings.processIDs.size())
+		{
+			// Heap profile the processes specified by the PIDs (maximum of two).
+			outputPrintf(L"\nStarting heap tracing to disk of PIDs %s...\n", heapSettings.processIDs.c_str());
+		}
+		else
+		{
+			std::wstring processNames;
+			for (auto& name : heapSettings.processNames)
+			{
+				if (processNames.size() > 0)
+					processNames += L" and ";
+				processNames += name;
+			}
+			outputPrintf(L"\nStarting heap tracing to disk of the %s processes...\n", processNames.c_str());
+		}
+	}
 	else
 		UIETWASSERT(0);
 
@@ -982,16 +1021,35 @@ void CUIforETWDlg::OnBnClickedStarttracing()
 		child.GetOutput();
 	}
 
-	std::wstring kernelProviders = L" Latency+POWER+DISPATCHER+DISK_IO_INIT+FILE_IO+FILE_IO_INIT+VIRT_ALLOC+MEMINFO";
+	// According to "xperf -providers k" the Latency kernel group is equivalent to:
+	// PROC_THREAD+LOADER+DISK_IO+HARD_FAULTS+DPC+INTERRUPT+CSWITCH+PROFILE
+	// On some machines (Google workstations) the DISK_IO provider causes (presumed
+	// to be spurious) lost event reports when doing circular buffer recording. So,
+	// omit DISK_IO when doing circular buffer recording.
+	// Doing so also improves the performance of saving circular buffer traces
+	// to disk.
+	std::wstring latency = L" Latency";
+	if (tracingMode_ == kTracingToMemory)
+		latency = L" PROC_THREAD+LOADER+HARD_FAULTS+DPC+INTERRUPT+CSWITCH+PROFILE";
+	std::wstring kernelProviders = latency + L"+POWER+DISPATCHER+DISK_IO_INIT+FILE_IO+FILE_IO_INIT+VIRT_ALLOC+MEMINFO";
+	bool cswitch_and_profile = true;
+	if (tracingMode_ == kHeapTracingToFile)
+	{
+		// Latency = PROC_THREAD+LOADER+DISK_IO+HARD_FAULTS+DPC+INTERRUPT+CSWITCH+PROFILE,
+		// but we don't need all that for heap tracing. The minimum set is PROC_THREAD+LOADER
+		// and we add on VIRT_ALLOC+MEMINFO because that seems appropriate for heap tracing.
+		kernelProviders = L" PROC_THREAD+LOADER+VIRT_ALLOC+MEMINFO";
+		cswitch_and_profile = false;
+	}
 	if (!extraKernelFlags_.empty())
 		kernelProviders += L"+" + extraKernelFlags_;
 	std::wstring kernelStackWalk;
 	// Record CPU sampling call stacks, from the PROFILE provider
-	if (bSampledStacks_)
+	if (bSampledStacks_ && cswitch_and_profile)
 		kernelStackWalk += L"+Profile";
 	// Record context-switch (switch in) and readying-thread (SetEvent, etc.)
 	// call stacks from DISPATCHER provider.
-	if (bCswitchStacks_)
+	if (bCswitchStacks_ && cswitch_and_profile)
 		kernelStackWalk += L"+CSwitch+ReadyThread";
 	// Record VirtualAlloc call stacks from the VIRT_ALLOC provider. Also
 	// record VirtualFree to allow investigation of memory leaks, even though
@@ -1035,6 +1093,12 @@ void CUIforETWDlg::OnBnClickedStarttracing()
 	// Memory-> Virtual Memory Snapshots. On windows 8.1 and above this makes the working set
 	// scanning in UIforETW unnecessary.
 	userProviders += L"+Microsoft-Windows-Kernel-Memory:0xE0";
+	if (IsWindows8Point1OrGreater())
+	{
+		// This includes process freeze events, thread priority change events, and
+		// other good stuff. This was apparently added in Windows 8.1.
+		userProviders += L"+Microsoft-Windows-Kernel-Process";
+	}
 
 	if (!extraUserProviders_.empty())
 	{
@@ -1045,7 +1109,6 @@ void CUIforETWDlg::OnBnClickedStarttracing()
 		catch (const std::exception& e)
 		{
 			outputPrintf(L"Check the extra user providers; failed to translate them from the TraceLogging name to a GUID.\n%hs\n", e.what());
-			StopEventThreads();
 			return;
 		}
 	}
@@ -1102,7 +1165,7 @@ void CUIforETWDlg::OnBnClickedStarttracing()
 		// CLR runtime provider
 		// https://msdn.microsoft.com/en-us/library/ff357718(v=vs.100).aspx
 		userProviders += L"+e13c0d23-ccbc-4e12-931b-d9cc2eee27e4:0x1CCBD:0x5";
-        
+
 		// note: this seems to be an updated version of
 		// userProviders += L"+ClrAll:0x98:5";
 		// which results in Invalid flags. (0x3ec) when I run it
@@ -1117,16 +1180,45 @@ void CUIforETWDlg::OnBnClickedStarttracing()
 		userFile = L" -buffering";
 	std::wstring userArgs = L" -start UIforETWSession -on " + userProviders + userBuffers + userFile;
 
-	// Heap tracing settings -- only used for heap tracing.
-	// Could also record stacks on HeapFree
-	// Buffer sizes need to be huge for some programs - should be configurable.
-	const int numHeapBuffers = BufferCountBoost(1000);
-	std::wstring heapBuffers = stringPrintf(L" -buffersize 1024 -minbuffers %d -maxBuffers %d", numHeapBuffers, numHeapBuffers);
-	std::wstring heapFile = L" -f \"" + GetHeapFile() + L"\"";
-	std::wstring heapStackWalk;
-	if (bHeapStacks_)
-		heapStackWalk = L" -stackwalk HeapCreate+HeapDestroy+HeapAlloc+HeapRealloc";
-	const std::wstring heapArgs = L" -start UIforETWHeapSession -heap -Pids 0" + heapStackWalk + heapBuffers + heapFile;
+	std::wstring heapArgs;
+	if (tracingMode_ == kHeapTracingToFile)
+	{
+		// Heap tracing settings -- only used for heap tracing.
+		// Could also record stacks on HeapFree
+		// Buffer sizes need to be huge for some programs - should be configurable.
+		const int numHeapBuffers = BufferCountBoost(1000);
+		std::wstring heapBuffers = stringPrintf(L" -buffersize 1024 -minbuffers %d -maxBuffers %d", numHeapBuffers, numHeapBuffers);
+		std::wstring heapFile = L" -f \"" + GetHeapFile() + L"\"";
+		std::wstring heapStackWalk;
+		if (bHeapStacks_)
+			heapStackWalk = L" -stackwalk HeapCreate+HeapDestroy+HeapAlloc+HeapRealloc";
+		auto heapSettings = ParseHeapTracingSettings(heapTracingExes_);
+		if (heapSettings.pathName.size())
+		{
+			// Launch and heap-profile the specified process, handy for heap-profiling
+			// the browser process from startup.
+			heapArgs = L" -start UIforETWHeapSession -heap -PidNewProcess \"" + heapSettings.pathName + L"\"" + heapStackWalk + heapBuffers + heapFile;
+		}
+		else if (heapSettings.processIDs.size())
+		{
+			// Heap profile the processes specified by the PIDs (maximum of two).
+			heapArgs = L" -start UIforETWHeapSession -heap -Pids " + heapSettings.processIDs + heapStackWalk + heapBuffers + heapFile;
+		}
+		else if (heapSettings.processNames.size())
+		{
+			// Heap profile the processes specified by heapSettings.processNames that
+			// were launched when the registry key was set (when "Heap tracing to file"
+			// was the selected tracing type).
+			heapArgs = L" -start UIforETWHeapSession -heap -Pids 0" + heapStackWalk + heapBuffers + heapFile;
+		}
+		else
+		{
+			outputPrintf(L"Error: no heap-profiled processes settings found. Go to the Settings dialog to configure them.\n");
+			return;
+		}
+	}
+
+	StartEventThreads();
 
 	bPreTraceRecorded_ = false;
 
@@ -1268,6 +1360,9 @@ void CUIforETWDlg::StopTracingAndMaybeRecord(bool bSaveTrace)
 				ETWMarkPrintf("Chrome ETW events were requested with keyword 0x%llx", chromeKeywords_);
 			// Record the entire xperf startup command to the trace.
 			ETWMarkWPrintf(L"Tracing startup command was: %s", startupCommand_.c_str());
+			LARGE_INTEGER frequency;
+			QueryPerformanceFrequency(&frequency);
+			ETWMarkWPrintf(L"QueryPerformanceFrequency is %1.3f MHz", frequency.QuadPart / 1e6);
 		}
 		if (bSaveTrace && tracingMode_ == kTracingToMemory)
 		{
@@ -1663,8 +1758,10 @@ void CUIforETWDlg::OnSize(UINT nType, int /*cx*/, int /*cy*/)
 		GetWindowRect(&windowRect);
 		const int xDelta = windowRect.Width() - lastWidth_;
 		lastWidth_ += xDelta;
+		previousWidth_ = lastWidth_;
 		const int yDelta = windowRect.Height() - lastHeight_;
 		lastHeight_ += yDelta;
+		previousHeight_ = lastHeight_;
 
 		const UINT flags = SWP_NOMOVE | SWP_NOOWNERZORDER | SWP_NOZORDER | SWP_NOACTIVATE;
 
@@ -1699,7 +1796,7 @@ void CUIforETWDlg::OnSize(UINT nType, int /*cx*/, int /*cy*/)
 			MoveControl(this, btSampledStacks_, xDelta, 0);
 			MoveControl(this, btFastSampling_, xDelta, 0);
 			MoveControl(this, btGPUTracing_, xDelta, 0);
-			MoveControl(this, btCLRTracing_, xDelta, 0 );
+			MoveControl(this, btCLRTracing_, xDelta, 0);
 			MoveControl(this, btInputTracingLabel_, xDelta, 0);
 			MoveControl(this, btInputTracing_, xDelta, 0);
 			MoveControl(this, btTracingMode_, xDelta, 0);
@@ -1836,13 +1933,19 @@ void CUIforETWDlg::SetHeapTracing(bool forceOff)
 	DWORD tracingFlags = tracingMode_ == kHeapTracingToFile ? 1 : 0;
 	if (forceOff)
 		tracingFlags = 0;
-	for (const auto& tracingName : split(heapTracingExes_, ';'))
+
+	auto heapSettings = ParseHeapTracingSettings(heapTracingExes_);
+
+	for (const auto& tracingName : heapSettings.processNames)
 	{
 		std::wstring targetKey = L"Software\\Microsoft\\Windows NT\\CurrentVersion\\Image File Execution Options";
 		CreateRegistryKey(HKEY_LOCAL_MACHINE, targetKey, tracingName);
 		targetKey += L"\\" + tracingName;
+		DWORD oldValue = 0;
+		bool oldValueValid = GetRegistryDWORD(HKEY_LOCAL_MACHINE, targetKey, L"TracingFlags", &oldValue);
 		SetRegistryDWORD(HKEY_LOCAL_MACHINE, targetKey, L"TracingFlags", tracingFlags);
-		if (tracingFlags)
+		// Print a message when setting the flag or when clearing it if it was previously set.
+		if (tracingFlags || (oldValueValid && tracingFlags != oldValue))
 			outputPrintf(L"\"TracingFlags\" in \"HKEY_LOCAL_MACHINE\\%s\" set to %lu.\n", targetKey.c_str(), tracingFlags);
 	}
 }
@@ -1860,10 +1963,7 @@ void CUIforETWDlg::OnCbnSelchangeTracingmode()
 		outputPrintf(L"Traces will be recorded to disk to allow arbitrarily long recordings.\n");
 		break;
 	case kHeapTracingToFile:
-		outputPrintf(L"Heap traces will be recorded to disk for %s. Note that only %s processes "
-			L"started after this is selected will be traced. \n"
-			L"To keep trace sizes manageable you may want to turn off context switch and CPU "
-			L"sampling call stacks.\n", heapTracingExes_.c_str(), heapTracingExes_.c_str());
+		outputPrintf(L"Heap traces will be recorded to disk.\n");
 		break;
 	}
 	SetHeapTracing(false);
@@ -1872,7 +1972,7 @@ void CUIforETWDlg::OnCbnSelchangeTracingmode()
 
 void CUIforETWDlg::OnBnClickedSettings()
 {
-	CSettings dlgSettings(nullptr, GetExeDir(), wpt81Dir_, wpt10Dir_);
+	CSettings dlgSettings(nullptr, GetExeDir(), wpt10Dir_);
 	dlgSettings.heapTracingExes_ = heapTracingExes_;
 	dlgSettings.WSMonitoredProcesses_ = WSMonitoredProcesses_;
 	dlgSettings.bExpensiveWSMonitoring_ = bExpensiveWSMonitoring_;
@@ -1889,6 +1989,7 @@ void CUIforETWDlg::OnBnClickedSettings()
 	dlgSettings.bHeapStacks_ = bHeapStacks_;
 	dlgSettings.bVirtualAllocStacks_ = bVirtualAllocStacks_;
 	dlgSettings.bVersionChecks_ = bVersionChecks_;
+	dlgSettings.bRecordTraceCommand_ = bRecordTraceCommand_;
 	dlgSettings.chromeKeywords_ = chromeKeywords_;
 	if (dlgSettings.DoModal() == IDOK)
 	{
@@ -1930,6 +2031,7 @@ void CUIforETWDlg::OnBnClickedSettings()
 		bHeapStacks_ = dlgSettings.bHeapStacks_;
 		bVirtualAllocStacks_ = dlgSettings.bVirtualAllocStacks_;
 		bVersionChecks_ = dlgSettings.bVersionChecks_;
+		bRecordTraceCommand_ = dlgSettings.bRecordTraceCommand_;
 		chromeKeywords_ = dlgSettings.chromeKeywords_;
 	}
 }
@@ -1950,18 +2052,8 @@ void CUIforETWDlg::OnContextMenu(CWnd* pWnd, CPoint point)
 		std::wstring tracePath;
 		if (selIndex >= 0)
 		{
-			// WPT 10 must be installed and 8.1 may be.
-			if (wpt81Dir_.empty())
-			{
-				// If WPT 8.1 is not installed then disable it.
-				pContextMenu->SetDefaultItem(ID_TRACES_OPENTRACEIN10WPA);
-				pContextMenu->EnableMenuItem(ID_TRACES_OPENTRACEINWPA, MF_BYCOMMAND | MF_GRAYED);
-			}
-			else
-			{
-				// Make WPT 10 the default.
-				pContextMenu->SetDefaultItem(ID_TRACES_OPENTRACEIN10WPA);
-			}
+			// WPT 10 must be installed. Make it the default.
+			pContextMenu->SetDefaultItem(ID_TRACES_OPENTRACEIN10WPA);
 			if (!PathFileExists(mxaPath_.c_str()))
 			{
 				pContextMenu->EnableMenuItem(ID_TRACES_OPENTRACEINEXPERIENCEANALYZER, MF_BYCOMMAND | MF_GRAYED);
@@ -1975,7 +2067,6 @@ void CUIforETWDlg::OnContextMenu(CWnd* pWnd, CPoint point)
 			// Those that are always available are commented out in this list.
 			int disableList[] =
 			{
-				ID_TRACES_OPENTRACEINWPA,
 				ID_TRACES_OPENTRACEIN10WPA,
 				ID_TRACES_OPENTRACEINGPUVIEW,
 				ID_TRACES_OPENTRACEINEXPERIENCEANALYZER,
@@ -2011,9 +2102,6 @@ void CUIforETWDlg::OnContextMenu(CWnd* pWnd, CPoint point)
 
 		switch (selection)
 		{
-			case ID_TRACES_OPENTRACEINWPA:
-				LaunchTraceViewer(tracePath, wpa81Path_);
-				break;
 			case ID_TRACES_OPENTRACEIN10WPA:
 				LaunchTraceViewer(tracePath, wpa10Path_);
 				break;
@@ -2114,18 +2202,6 @@ void CUIforETWDlg::CopyTraceName()
 	}
 }
 
-
-void CUIforETWDlg::OnOpenTraceWPA()
-{
-	const int selIndex = btTraces_.GetCurSel();
-
-	if (selIndex >= 0)
-	{
-		std::wstring tracePath = GetTraceDir() + traces_[selIndex] + L".etl";
-		// The default viewer is WPA 10
-		LaunchTraceViewer(tracePath, wpa10Path_);
-	}
-}
 
 void CUIforETWDlg::OnOpenTrace10WPA()
 {
@@ -2291,6 +2367,31 @@ void CUIforETWDlg::CreateFlameGraph(const std::wstring& traceFilename)
 
 void CUIforETWDlg::PreprocessTrace(const std::wstring& traceFilename)
 {
+	if (bRecordTraceCommand_)
+	{
+		// For debugging or just better understanding of what was recorded, optionally
+		// record the xperf command line. This is excessiverly verbose so make it
+		// optional.
+		std::wstring textFilename = StripExtensionFromPath(traceFilename) + L".txt";
+		std::wstring data = LoadFileAsText(textFilename);
+		data += L"Trace recording command was \r\n";
+		data += startupCommand_;
+		data += L"\r\n";
+		switch (tracingMode_)
+		{
+		case kTracingToMemory:
+			data += L"(circular buffer tracing)";
+			break;
+		case kTracingToFile:
+			data += L"(tracing to file)";
+			break;
+		case kHeapTracingToFile:
+			data += L"(heap tracing to file)";
+			break;
+		}
+		data += L"\r\n\r\n";
+		WriteTextAsFile(textFilename, data);
+	}
 	if (bChromeDeveloper_)
 	{
 		IdentifyChromeProcesses(traceFilename, bIdentifyChromeProcessesCPU_);

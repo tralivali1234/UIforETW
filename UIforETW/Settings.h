@@ -26,7 +26,7 @@ class CSettings : public CDialog
 	DECLARE_DYNAMIC(CSettings)
 
 public:
-	CSettings(CWnd* pParent, const std::wstring& exeDir, const std::wstring& wpt81Dir, const std::wstring& wpt10Dir) noexcept;   // standard constructor
+	CSettings(CWnd* pParent, const std::wstring& exeDir, const std::wstring& wpt10Dir) noexcept;   // standard constructor
 	~CSettings();
 
 // Dialog Data
@@ -49,6 +49,7 @@ public:
 	bool bHeapStacks_ = false;
 	bool bVirtualAllocStacks_ = false;
 	bool bVersionChecks_ = false;
+	bool bRecordTraceCommand_ = false;
 	uint64_t chromeKeywords_ = 0;
 
 protected:
@@ -63,6 +64,7 @@ protected:
 	CButton btCopyStartupProfile_;
 
 	CButton btUseOtherKernelLogger_;
+	CButton btRecordTraceCommand_;
 	CButton btChromeDeveloper_;
 	CButton btIdentifyChromeProcessesCPU_;
 	CButton btBackgroundMonitoring_;
@@ -80,7 +82,6 @@ protected:
 
 	const std::wstring exeDir_;
 	// Same meaning as in CUIforETWDlg
-	const std::wstring wpt81Dir_;
 	const std::wstring wpt10Dir_;
 
 	DECLARE_MESSAGE_MAP()
@@ -104,4 +105,5 @@ public:
 	CSettings& operator=(const CSettings&&) = delete;
 	CSettings(const CSettings&) = delete;
 	CSettings(const CSettings&&) = delete;
+  afx_msg void OnBnClickedRecordTraceCommand();
 };

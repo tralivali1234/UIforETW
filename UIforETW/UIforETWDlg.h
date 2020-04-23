@@ -152,9 +152,7 @@ private:
 	// this string object, so don't change it without adding synchronization.
 	std::wstring traceDir_;
 	std::wstring tempTraceDir_;
-	std::wstring wpt81Dir_; // This points to the WPT 8.1 directory if it exists, else nothing.
 	std::wstring wpt10Dir_; // If WPT 10 isn't installed UIforETW will exit.
-	std::wstring wpa81Path_;
 	std::wstring wpa10Path_;
 	std::wstring gpuViewPath_;
 	std::wstring wpaDefaultPath() const; // Default viewer.
@@ -211,6 +209,13 @@ private:
 	int initialHeight_ = 0;
 	int lastWidth_ = 0;
 	int lastHeight_ = 0;
+	int minWidth_ = 0;
+	int minHeight_ = 0;
+	const int maxWidth_ = 3000;
+	const int maxHeight_ = 3000;
+	// Width and height persisted to settings
+	int previousWidth_ = 0;
+	int previousHeight_ = 0;
 
 	void SetSymbolPath();
 	// Call this to retrieve a directory from an environment variable, or use
@@ -229,6 +234,7 @@ private:
 	// Editable only by the settings dialog.
 	bool bBackgroundMonitoring_ = true;
 	bool bChromeDeveloper_ = false;
+	bool bRecordTraceCommand_ = false; // Should the trace command be put in the .txt file?
 	bool bIdentifyChromeProcessesCPU_ = false;
 	bool bAutoViewTraces_ = false;
 	bool bRecordPreTrace_ = false;
@@ -285,7 +291,6 @@ private:
 	afx_msg void OnFullRenameKey();
 	afx_msg void FinishTraceRename();
 	afx_msg void CancelTraceRename();
-	afx_msg void OnOpenTraceWPA();
 	afx_msg void OnOpenTrace10WPA();
 	afx_msg void OnOpenTraceGPUView();
 	afx_msg void CopyTraceName();

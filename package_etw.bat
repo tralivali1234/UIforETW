@@ -33,11 +33,14 @@ xcopy "%wpt10%Licenses\10.0.15063.0\sdk_license.rtf" %destdir%\third_party\wpt10
 ren %destdir%\third_party\wpt10\sdk_license.rtf LICENSE.rtf
 
 @rem Add VS tools to the path. Also adds signtool.exe to the path.
-set vcvars32="C:\Program Files (x86)\Microsoft Visual Studio\2017\Community\VC\Auxiliary\Build\vcvars32.bat"
+set vcvars32="C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Auxiliary\Build\vcvars32.bat"
 if exist %vcvars32% goto community_installed
-set vcvars32="C:\Program Files (x86)\Microsoft Visual Studio\2017\Professional\VC\Auxiliary\Build\vcvars32.bat"
+set vcvars32="C:\Program Files (x86)\Microsoft Visual Studio\2019\Professional\VC\Auxiliary\Build\vcvars32.bat"
 :community_installed
 call %vcvars32%
+
+@rem Build DelayedCreateProcess.exe to the bin directory
+call DelayedCreateProcess\make.bat
 
 cd /d %UIforETW%ETWInsights
 devenv /rebuild "release|Win32" ETWInsights.sln
@@ -91,10 +94,12 @@ xcopy %UIforETW%bin\UIforETWStatic_devrel32.exe %destdir%\bin\UIforETW32.exe /y
 xcopy %UIforETW%bin\UIforETWStatic_devrel.exe %destdir%\bin\UIforETW.exe /y
 xcopy %UIforETW%bin\EventEmitter.exe %destdir%\bin /y
 xcopy %UIforETW%bin\EventEmitter64.exe %destdir%\bin /y
+xcopy %UIforETW%third_party\dbghelp.dll %destdir%\bin /y
+xcopy %UIforETW%third_party\symsrv.dll %destdir%\bin /y
 
 @rem Sign the important (requiring elevation) binaries
 set bindir=%~dp0etwpackage\bin
-signtool sign /d "UIforETW" /du "https://github.com/google/UIforETW/releases" /n "Bruce Dawson" /tr http://timestamp.digicert.com /td SHA256 /fd SHA256 %bindir%\UIforETW.exe %bindir%\UIforETW32.exe %bindir%\EventEmitter.exe %bindir%\EventEmitter64.exe %bindir%\flame_graph.exe %bindir%\RetrieveSymbols.exe %bindir%\DummyChrome.dll %bindir%\ETWProviders.dll %bindir%\ETWProviders64.dll
+signtool sign /d "UIforETW" /du "https://github.com/google/UIforETW/releases" /n "Bruce Dawson" /tr http://timestamp.digicert.com /td SHA256 /fd SHA256 %bindir%\UIforETW.exe %bindir%\UIforETW32.exe %bindir%\EventEmitter.exe %bindir%\EventEmitter64.exe %bindir%\flame_graph.exe %bindir%\RetrieveSymbols.exe %bindir%\DelayedCreateProcess.exe %bindir%\DummyChrome.dll %bindir%\ETWProviders.dll %bindir%\ETWProviders64.dll %bindir%\ETWProvidersARM64.dll
 @if not %errorlevel% equ 0 goto signing_failure
 
 @rem Copy the official binaries back to the local copy, for development purposes.
@@ -154,17 +159,44 @@ powershell ..\GitHub-Source-Indexer\github-sourceindexer.ps1 -symbolsFolder etws
 @echo %temp%\srcsrv\pdbstr -r -p:etwsymbols\UIforETWStatic_devrel32.pdb -s:srcsrv
 :NoSourceIndexing
 
+@rem Copy the critical PE files to the symbol server as well, to demonstrate best practices.
+copy etwpackage\bin\UIforETW*.exe etwsymbols
+
+@rem Add the PE and PDB files to a local symbol server directory, to get the
+@rem required directory structure:
+if exist etwsymserver rmdir /s/q etwsymserver 
+"c:\Program Files (x86)\Windows Kits\10\Debuggers\x64\symstore.exe" add /r /f etwsymbols /s etwsymserver /t uiforetw
+@rem Delete the excess files.
+rmdir etwsymserver\000Admin /s/q
+del etwsymserver\pingme.txt
+del etwsymserver\refs.ptr /s
+
+cd etwsymserver
+@rem Upload to the randomascii-symbols public symbol server.
+@echo Ready to upload the symbols?
+@pause
+call python c:\src\depot_tools\gsutil.py cp -Z -R  . gs://randomascii-symbols
+cd ..
+@echo on
+
+@rem Make the redistributable .zip file
 del *.zip 2>nul
 call python make_zip_file.py etwpackage.zip etwpackage
 @echo on
-call python make_zip_file.py etwsymbols.zip etwsymbols
-@echo on
+
+@rem Rename to the current version.
 call python rename_to_version.py UIforETW\Version.h
 @echo on
 
-@echo Now upload the new etwpackage*.zip and etwsymbols*.zip
+@echo Now upload the new etwpackage*.zip
 @echo But make sure that the PersistedPresets section from startup10.wpaProfile
 @echo been deleted to avoid shipping modified presets and bloating the file.
+@echo After releasing a version with an updated version number be sure to trigger
+@echo the new version checking by running:
+@echo xcopy UIforETW\Version.h UIforETW\VersionCopy.h /y
+@echo git add UIforETW\VersionCopy.h
+@echo git commit -m "Updating VersionCopy.h for updated version checking"
+@echo git push
 @exit /b
 
 :pleasecloseUIforETW
